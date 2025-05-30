@@ -1,0 +1,52 @@
+#ifndef DECODER_H
+#define DECODER_H
+
+#include "../Conditions/Condition.h"
+#include "Input.h"
+
+// Скорее даже какой-то TimeBasedDecoder получается
+// Фактически пока у нас есть набор данных, разбитый по дискретным интервалам (InputData)
+// Декодер позволит нормально читать их определять примреное время событий
+
+class Decoder
+{
+public:
+  Decoder(InputData<float>* data, uint32_t dataRate)
+      : input(data)
+      , readsPerSecond(dataRate)
+  {}
+
+  void RegisterCondition(Condition<float>* c) { conditions.push_back(c); }
+
+  void Run()
+  {
+    uint32_t frame = 0;
+    float realTime = .0f;
+
+    while(!input->IsFinished()) {
+      input->ReadFields();
+
+      realTime = GetTime(frame);
+
+      this->CheckConditions(realTime);
+
+      frame++;
+    }
+  }
+
+  virtual void CheckConditions(float time) = 0;
+
+private:
+  float GetTime(uint32_t frame)
+  {
+    return static_cast<float>(frame) / readsPerSecond;
+  }
+
+protected:
+  InputData<float>* input;
+  std::vector<Condition<float>*> conditions;
+
+  uint32_t readsPerSecond = 24;
+};
+
+#endif// DECODER_H
