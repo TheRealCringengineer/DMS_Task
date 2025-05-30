@@ -1,8 +1,11 @@
+#include <cstdint>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <vector>
 
@@ -16,102 +19,286 @@
 // Ну и вообще по хорошему должен быть интерфейс на случай, если будет другой формат
 // Но полноценный интерфейс разрабатывать пока не хочется, поэтому так
 
-class InputDataStream
+template<typename D,
+         typename =
+             typename std::enable_if<std::is_floating_point<D>::value, D>::type>
+class InputData
+{
+public:
+  virtual void ReadFields() = 0;
+
+  virtual bool IsFinished() = 0;
+
+  virtual uint32_t GetCurrentFrame() { return currentFrame; }
+
+  virtual D GetField(std::string_view name) = 0;
+
+  virtual ~InputData() = default;
+
+protected:
+  uint32_t currentFrame = 0;
+};
+
+template<typename D>
+class InputDataStream : public InputData<D>
 {
 public:
   InputDataStream(std::basic_istream<char, std::char_traits<char>>* inp,
-                  std::vector<std::string> ind)
+                  std::vector<std::string> ind,
+                  const std::string& del)
       : input(inp)
-      , delimiter(";")
+      , delimiter(del)
   {
     for(size_t i = 0; i < ind.size(); i++) indexes[ind[i]] = i;
   }
 
-  void ReadLine()
+  void ReadFields() override
   {
     std::getline(*input, line);
-    while(line[0] == '#') { std::getline(*input, line); }// Skipping comments
+
+    // Skipping comments
+    while(line.empty() || line[0] == COMMENT_SYMBOL) {
+      if(input->eof()) return;
+      std::getline(*input, line);
+    }
+
+    this->currentFrame++;
     Split();
   }
 
-  float GetField(const std::string& name) { return tokens[indexes[name]]; }
+  bool IsFinished() override { return input->eof(); }
+
+  D GetField(std::string_view name) override
+  {
+    return tokens[indexes[name.data()]];
+  }
 
 private:
+  const char COMMENT_SYMBOL = '#';
+
   std::unordered_map<std::string, size_t> indexes;
   std::string line;
   std::basic_istream<char, std::char_traits<char>>* input;
 
-  // Не лучший способ, ну да не суть
-  std::vector<float> tokens;
-  size_t pos = 0;
+  std::vector<D> tokens;
   std::string token;
   std::string delimiter;
+
+  size_t splitStart, splitEnd;
+
   void Split()
   {
     tokens.clear();
-    while((pos = line.find(delimiter)) != std::string::npos) {
-      token = line.substr(0, pos);
-      tokens.push_back(std::stof(token));
-      line.erase(0, pos + delimiter.length());
+    splitStart = 0;
+
+    while((splitEnd = line.find(delimiter, splitStart)) != std::string::npos) {
+      token = line.substr(splitStart, splitEnd - splitStart);
+      splitStart = splitEnd + delimiter.size();
+      if constexpr(std::is_same_v<D, float>) tokens.push_back(std::stof(token));
+
+      if constexpr(std::is_same_v<D, double>)
+        tokens.push_back(std::stod(token));
     }
-    tokens.push_back(std::stof(line));
+
+    if(!line.substr(splitStart).empty()) {
+      if constexpr(std::is_same_v<D, float>) {
+        tokens.push_back(std::stof(line.substr(splitStart)));
+      }
+
+      if constexpr(std::is_same_v<D, double>)
+        tokens.push_back(std::stod(line.substr(splitStart)));
+    }
   }
+};
+
+// Идея по проверки непосредственно определенных условий
+// Возьмём "сон". Это значит
+// 1) Есть person
+// 2) Есть оба глаза
+// 3) Оба глаза закрыты
+// На этапе конкретного промежутка времени мы можем задать сложные условия формата
+// {
+//   "Person.confidence" > X
+// }
+// and
+// {
+//   "Eye1.detection.confidence" > Y
+// }
+// Вроде такого
+// Фактически - набор из name + bool function(float value)
+//
+
+template<typename D>
+class Condition
+{
+public:
+  virtual void CheckCondition(InputData<D>* data) = 0;
+
+  virtual ~Condition() = default;
+
+protected:
+  uint32_t start = 0;
+  uint32_t end = 0;
+};
+
+template<typename D>
+class EyesClosedCondition : public Condition<D>
+{
+public:
+  void CheckCondition(InputData<D>* data) override
+  {
+    if(IsPerson(data)) {
+      if(IsHead(data)) {
+        if(IsLeftEye(data) && IsRightEye(data)) {
+          if(IsLeftEyeClosed(data)) { std::cout << "LEFT EYE CLOSED AND "; }
+          if(IsLeftEyeOpened(data)) { std::cout << "LEFT EYE OPEN AND "; }
+          if(IsLeftEyeUnknown(data)) { std::cout << "LEFT EYE UNKNOWN AND "; }
+          if(IsRightEyeClosed(data)) { std::cout << "RIGHT EYE CLOSED\n"; }
+          if(IsRightEyeOpened(data)) { std::cout << "RIGHT EYE OPEN\n"; }
+          if(IsRightEyeUnknown(data)) { std::cout << "RIGHT EYE UNKNOWN\n"; }
+          return;
+        }
+        std::cout << "HEAD\n";
+        return;
+      }
+      std::cout << "PERSON\n";
+      return;
+    } else {
+      std::cout << "NO PERSON\n";
+    }
+  };
+
+  ~EyesClosedCondition() override = default;
+
+private:
+  const float SUCCESS_VALUE = 0.5f;
+  bool IsPerson(InputData<D>* data)
+  {
+    return data->GetField("Person.confidence") > SUCCESS_VALUE;
+  }
+
+  bool IsHead(InputData<D>* data)
+  {
+    return data->GetField("Head.detection.confidence") > SUCCESS_VALUE;
+  }
+
+  bool IsLeftEye(InputData<D>* data)
+  {
+    return data->GetField("Eye1.detection.confidence") > SUCCESS_VALUE;
+  }
+
+  bool IsLeftEyeOpened(InputData<D>* data)
+  {
+    return data->GetField("Eye1.state.probOpen") > SUCCESS_VALUE;
+  }
+
+  bool IsLeftEyeClosed(InputData<D>* data)
+  {
+    return data->GetField("Eye1.state.probClosed") > SUCCESS_VALUE;
+  }
+
+  bool IsLeftEyeUnknown(InputData<D>* data)
+  {
+    return data->GetField("Eye1.state.probUnknown") > SUCCESS_VALUE;
+  }
+
+  bool IsRightEye(InputData<D>* data)
+  {
+    return data->GetField("Eye2.detection.confidence") > SUCCESS_VALUE;
+  }
+
+  bool IsRightEyeOpened(InputData<D>* data)
+  {
+    return data->GetField("Eye2.state.probOpen") > SUCCESS_VALUE;
+  }
+
+  bool IsRightEyeClosed(InputData<D>* data)
+  {
+    return data->GetField("Eye2.state.probClosed") > SUCCESS_VALUE;
+  }
+
+  bool IsRightEyeUnknown(InputData<D>* data)
+  {
+    return data->GetField("Eye2.state.probUnknown") > SUCCESS_VALUE;
+  }
+};
+
+class Analyzer
+{
+public:
+  Analyzer(InputData<float>* data)
+      : input(data)
+  {}
+
+  void RegisterCondition(Condition<float>* c) { conditions.push_back(c); }
+
+  void Analyze()
+  {
+    while(!input->IsFinished()) {
+      input->ReadFields();
+      for(auto condition: conditions) condition->CheckCondition(input);
+    }
+  }
+
+private:
+  InputData<float>* input;
+  std::vector<Condition<float>*> conditions;
 };
 
 int main()
 {
-  InputDataStream data(new std::ifstream("perception_results.txt"),
-                       {"Camera.probBlocked",
-                        "Person.confidence",
-                        "Person.bbox.x",
-                        "Person.bbox.y",
-                        "Person.bbox.width",
-                        "Person.bbox.height",
-                        "Head.detection.confidence",
-                        "Head.detection.bbox.x",
-                        "Head.detection.bbox.y",
-                        "Head.detection.bbox.width",
-                        "Head.detection.bbox.height",
-                        "Head.position.x",
-                        "Head.position.y",
-                        "Head.position.z",
-                        "Head.orientation.yaw",
-                        "Head.orientation.pitch",
-                        "Head.orientation.roll",
-                        "Head.gaze.yaw",
-                        "Head.gaze.pitch",
-                        "Hand1.confidence",
-                        "Hand1.bbox.x",
-                        "Hand1.bbox.y",
-                        "Hand1.bbox.width",
-                        "Hand1.bbox.height",
-                        "Hand2.confidence",
-                        "Hand2.bbox.x",
-                        "Hand2.bbox.y",
-                        "Hand2.bbox.width",
-                        "Hand2.bbox.height",
-                        "Eye1.detection.confidence",
-                        "Eye1.detection.bbox.x",
-                        "Eye1.detection.bbox.y",
-                        "Eye1.detection.bbox.width",
-                        "Eye1.detection.bbox.height",
-                        "Eye1.state.probClosed",
-                        "Eye1.state.probOpen",
-                        "Eye1.state.probUnknown",
-                        "Eye2.detection.confidence",
-                        "Eye2.detection.bbox.x",
-                        "Eye2.detection.bbox.y",
-                        "Eye2.detection.bbox.width",
-                        "Eye2.detection.bbox.height",
-                        "Eye2.state.probClosed",
-                        "Eye2.state.probOpen",
-                        "Eye2.state.probUnknown"});
+  auto d =
+      new InputDataStream<float>(new std::ifstream("perception_results.txt"),
+                                 {"Camera.probBlocked",
+                                  "Person.confidence",
+                                  "Person.bbox.x",
+                                  "Person.bbox.y",
+                                  "Person.bbox.width",
+                                  "Person.bbox.height",
+                                  "Head.detection.confidence",
+                                  "Head.detection.bbox.x",
+                                  "Head.detection.bbox.y",
+                                  "Head.detection.bbox.width",
+                                  "Head.detection.bbox.height",
+                                  "Head.position.x",
+                                  "Head.position.y",
+                                  "Head.position.z",
+                                  "Head.orientation.yaw",
+                                  "Head.orientation.pitch",
+                                  "Head.orientation.roll",
+                                  "Head.gaze.yaw",
+                                  "Head.gaze.pitch",
+                                  "Hand1.confidence",
+                                  "Hand1.bbox.x",
+                                  "Hand1.bbox.y",
+                                  "Hand1.bbox.width",
+                                  "Hand1.bbox.height",
+                                  "Hand2.confidence",
+                                  "Hand2.bbox.x",
+                                  "Hand2.bbox.y",
+                                  "Hand2.bbox.width",
+                                  "Hand2.bbox.height",
+                                  "Eye1.detection.confidence",
+                                  "Eye1.detection.bbox.x",
+                                  "Eye1.detection.bbox.y",
+                                  "Eye1.detection.bbox.width",
+                                  "Eye1.detection.bbox.height",
+                                  "Eye1.state.probClosed",
+                                  "Eye1.state.probOpen",
+                                  "Eye1.state.probUnknown",
+                                  "Eye2.detection.confidence",
+                                  "Eye2.detection.bbox.x",
+                                  "Eye2.detection.bbox.y",
+                                  "Eye2.detection.bbox.width",
+                                  "Eye2.detection.bbox.height",
+                                  "Eye2.state.probClosed",
+                                  "Eye2.state.probOpen",
+                                  "Eye2.state.probUnknown"},
+                                 ";");
 
-  for(size_t i = 0; i < 5; i++) {
-    data.ReadLine();
-
-    std::cout << data.GetField("Person.confidence") << std::endl;
-  }
+  Analyzer a(d);
+  a.RegisterCondition(new EyesClosedCondition<float>());
+  a.Analyze();
 
   return 0;
 }
