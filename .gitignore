@@ -1,2 +1,4 @@
 Debug/
 Release/
+compile_commands.json
+.cache
