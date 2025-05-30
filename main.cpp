@@ -148,13 +148,15 @@ public:
 
   virtual ConditionState CheckCondition(InputData<D>* data, float time) = 0;
 
+  virtual bool ShouldNotify() = 0;
+
   virtual ~Condition() = default;
 
   std::string_view GetName() { return name; }
 
   float GetStartTime() { return startTime; }
   float GetEndTime() { return endTime; }
-  float GetInterval() { return endTime - startTime; }
+  float GetDuration() { return endTime - startTime; }
 
 protected:
   std::string name;
@@ -170,6 +172,10 @@ public:
   EyesClosedCondition()
       : Condition<D>("Eyes closed")
   {}
+
+  // В данных нет длительности больше 2-х секунд даже)
+  // Поэтому сделал вот так, чтобы была видна работа
+  bool ShouldNotify() override { return this->GetDuration() > 1.0f; }
 
   ConditionState CheckCondition(InputData<D>* data, float time) override
   {
@@ -355,9 +361,10 @@ public:
         break;
       case ConditionState::End:
         // Event
-        eventBus->FireEvent(condition->GetName(),
-                            condition->GetStartTime(),
-                            condition->GetEndTime());
+        if(condition->ShouldNotify())
+          eventBus->FireEvent(condition->GetName(),
+                              condition->GetStartTime(),
+                              condition->GetEndTime());
         break;
       case ConditionState::NoChange:
         break;
