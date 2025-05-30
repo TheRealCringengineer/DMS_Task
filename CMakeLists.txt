@@ -15,3 +15,4 @@ add_custom_target(
 endif()
 
 add_executable(${PROJECT_NAME} main.cpp Input/Input.cpp CustomConditions.cpp)
+configure_file(perception_results.txt ${CMAKE_BINARY_DIR}/perception_results.txt COPYONLY)
