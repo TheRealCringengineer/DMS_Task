@@ -128,49 +128,87 @@ private:
 // Фактически - набор из name + bool function(float value)
 //
 
+enum class ConditionState : uint8_t
+{
+  Start = 0,
+  NoChange,
+  End
+};
+
 template<typename D>
 class Condition
 {
 public:
-  virtual void CheckCondition(InputData<D>* data) = 0;
+  Condition(const std::string& n)
+      : name(n)
+  {}
+
+  virtual ConditionState CheckCondition(InputData<D>* data) = 0;
 
   virtual ~Condition() = default;
 
+  std::string_view GetName() { return name; }
+
 protected:
-  uint32_t start = 0;
-  uint32_t end = 0;
+  std::string name;
 };
 
 template<typename D>
 class EyesClosedCondition : public Condition<D>
 {
 public:
-  void CheckCondition(InputData<D>* data) override
+  EyesClosedCondition()
+      : Condition<D>("Eyes closed")
+  {}
+
+  ConditionState CheckCondition(InputData<D>* data) override
   {
+    prevState = wasLeftEyeClosed && wasRightEyeClosed;
+
     if(IsPerson(data)) {
       if(IsHead(data)) {
         if(IsLeftEye(data) && IsRightEye(data)) {
-          if(IsLeftEyeClosed(data)) { std::cout << "LEFT EYE CLOSED AND "; }
-          if(IsLeftEyeOpened(data)) { std::cout << "LEFT EYE OPEN AND "; }
-          if(IsLeftEyeUnknown(data)) { std::cout << "LEFT EYE UNKNOWN AND "; }
-          if(IsRightEyeClosed(data)) { std::cout << "RIGHT EYE CLOSED\n"; }
-          if(IsRightEyeOpened(data)) { std::cout << "RIGHT EYE OPEN\n"; }
-          if(IsRightEyeUnknown(data)) { std::cout << "RIGHT EYE UNKNOWN\n"; }
-          return;
+          if(IsLeftEyeClosed(data)) {
+            wasLeftEyeClosed = true;
+          } else if(IsLeftEyeOpened(data)) {
+            wasLeftEyeClosed = false;
+          }
+
+          if(IsRightEyeClosed(data)) {
+            wasRightEyeClosed = true;
+          } else if(IsRightEyeOpened(data)) {
+            wasRightEyeClosed = false;
+          }
         }
-        std::cout << "HEAD\n";
-        return;
       }
-      std::cout << "PERSON\n";
-      return;
     } else {
-      std::cout << "NO PERSON\n";
+      // Если мы не можем найти человека => всё нормально
+      wasRightEyeClosed = false;
+      wasLeftEyeClosed = false;
     }
+
+    // Если человек есть, а головы, глаз не видно => считаем что состояние
+    // закрытия/открытия глаз не менялось
+    if(!prevState && (wasRightEyeClosed && wasLeftEyeClosed))
+      return ConditionState::Start;
+
+    if(prevState && !(wasRightEyeClosed && wasLeftEyeClosed))
+      return ConditionState::End;
+
+    return ConditionState::NoChange;
   };
 
   ~EyesClosedCondition() override = default;
 
 private:
+  bool prevState = false;
+
+  // Храним последнее состояние глаза. В случае
+  // неопредленного сотояния (probUnknown или вероятности у всех состояний < 0.5)
+  // мы учитываем его как текущее состояние
+  bool wasLeftEyeClosed = false;
+  bool wasRightEyeClosed = false;
+
   const float SUCCESS_VALUE = 0.5f;
   bool IsPerson(InputData<D>* data)
   {
@@ -226,23 +264,50 @@ private:
 class Analyzer
 {
 public:
-  Analyzer(InputData<float>* data)
+  Analyzer(InputData<float>* data, uint32_t frameRate)
       : input(data)
+      , framesPerSecond(frameRate)
   {}
 
   void RegisterCondition(Condition<float>* c) { conditions.push_back(c); }
 
-  void Analyze()
+  void Run()
   {
+    uint32_t frame = 0;
+
     while(!input->IsFinished()) {
       input->ReadFields();
-      for(auto condition: conditions) condition->CheckCondition(input);
+      for(auto condition: conditions) {
+
+        ConditionState state = condition->CheckCondition(input);
+        switch(state) {
+        case ConditionState::Start:
+          std::cout << condition->GetName() << " started at " << GetTime(frame)
+                    << "\n";
+          break;
+        case ConditionState::End:
+          std::cout << condition->GetName() << " finished at " << GetTime(frame)
+                    << "\n";
+          break;
+        case ConditionState::NoChange:
+          break;
+        }
+      }
+
+      frame++;
     }
   }
 
 private:
+  float GetTime(uint32_t frame)
+  {
+    return static_cast<float>(frame) / framesPerSecond;
+  }
+
   InputData<float>* input;
   std::vector<Condition<float>*> conditions;
+
+  uint32_t framesPerSecond = 24;
 };
 
 int main()
@@ -296,9 +361,10 @@ int main()
                                   "Eye2.state.probUnknown"},
                                  ";");
 
-  Analyzer a(d);
+  const uint32_t VIDEO_FRAMERATE = 20;
+  Analyzer a(d, VIDEO_FRAMERATE);
   a.RegisterCondition(new EyesClosedCondition<float>());
-  a.Analyze();
+  a.Run();
 
   return 0;
 }
