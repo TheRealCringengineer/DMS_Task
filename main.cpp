@@ -2,12 +2,15 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <type_traits>
 #include <unordered_map>
 #include <vector>
+
+#include "Events/EventBus.h"
 
 // Начнём с обработки входного файла.
 // unoredered_map не очень подходит, потому что хотелось бы итерировать по строчкам
@@ -143,14 +146,21 @@ public:
       : name(n)
   {}
 
-  virtual ConditionState CheckCondition(InputData<D>* data) = 0;
+  virtual ConditionState CheckCondition(InputData<D>* data, float time) = 0;
 
   virtual ~Condition() = default;
 
   std::string_view GetName() { return name; }
 
+  float GetStartTime() { return startTime; }
+  float GetEndTime() { return endTime; }
+  float GetInterval() { return endTime - startTime; }
+
 protected:
   std::string name;
+
+  float startTime = .0f;
+  float endTime = .0f;
 };
 
 template<typename D>
@@ -161,7 +171,7 @@ public:
       : Condition<D>("Eyes closed")
   {}
 
-  ConditionState CheckCondition(InputData<D>* data) override
+  ConditionState CheckCondition(InputData<D>* data, float time) override
   {
     prevState = wasLeftEyeClosed && wasRightEyeClosed;
 
@@ -189,11 +199,15 @@ public:
 
     // Если человек есть, а головы, глаз не видно => считаем что состояние
     // закрытия/открытия глаз не менялось
-    if(!prevState && (wasRightEyeClosed && wasLeftEyeClosed))
+    if(!prevState && (wasRightEyeClosed && wasLeftEyeClosed)) {
+      this->startTime = time;
       return ConditionState::Start;
+    }
 
-    if(prevState && !(wasRightEyeClosed && wasLeftEyeClosed))
+    if(prevState && !(wasRightEyeClosed && wasLeftEyeClosed)) {
+      this->endTime = time;
       return ConditionState::End;
+    }
 
     return ConditionState::NoChange;
   };
@@ -267,7 +281,7 @@ private:
 // В таком случае, возможно стоит конвертировать кадры в мс/нс/с внутри Analyzer'а и уведомлят об этом
 // какой-то дополнтиельный класс?
 //
-// Wrapper над Condition? 
+// Wrapper над Condition?
 // Что-то вроде
 // class Event {
 // publiic:
@@ -293,29 +307,20 @@ public:
   void Run()
   {
     uint32_t frame = 0;
+    float realTime = .0f;
 
     while(!input->IsFinished()) {
       input->ReadFields();
-      for(auto condition: conditions) {
 
-        ConditionState state = condition->CheckCondition(input);
-        switch(state) {
-        case ConditionState::Start:
-          std::cout << condition->GetName() << " started at " << GetTime(frame)
-                    << "\n";
-          break;
-        case ConditionState::End:
-          std::cout << condition->GetName() << " finished at " << GetTime(frame)
-                    << "\n";
-          break;
-        case ConditionState::NoChange:
-          break;
-        }
-      }
+      realTime = GetTime(frame);
+
+      this->CheckConditions(realTime);
 
       frame++;
     }
   }
+
+  virtual void CheckConditions(float time) = 0;
 
 private:
   float GetTime(uint32_t frame)
@@ -323,10 +328,45 @@ private:
     return static_cast<float>(frame) / framesPerSecond;
   }
 
+protected:
   InputData<float>* input;
   std::vector<Condition<float>*> conditions;
 
   uint32_t framesPerSecond = 24;
+};
+
+class StdoutAnalyzer : public Analyzer
+{
+public:
+  StdoutAnalyzer(InputData<float>* data,
+                 uint32_t frameRate,
+                 EventBus<std::string_view, float, float>* e)
+      : Analyzer(data, frameRate)
+      , eventBus(e)
+  {}
+
+  void CheckConditions(float time) override
+  {
+    for(auto condition: conditions) {
+
+      ConditionState state = condition->CheckCondition(input, time);
+      switch(state) {
+      case ConditionState::Start:
+        break;
+      case ConditionState::End:
+        // Event
+        eventBus->FireEvent(condition->GetName(),
+                            condition->GetStartTime(),
+                            condition->GetEndTime());
+        break;
+      case ConditionState::NoChange:
+        break;
+      }
+    }
+  }
+
+private:
+  EventBus<std::string_view, float, float>* eventBus;
 };
 
 int main()
@@ -380,8 +420,20 @@ int main()
                                   "Eye2.state.probUnknown"},
                                  ";");
 
+  EventBus<std::string_view, float, float> eventBus;
+
+  // Выглядит ужасно, но пойдёт
+  auto sh = std::make_shared<
+      std::function<bool(std::string_view name, float start, float end)>>(
+      [](std::string_view name, float start, float end) -> bool {
+        std::cout << "Event : " << name << " started at " << start
+                  << " ended at " << end << "\n";
+        return false;
+      });
+  eventBus.Register(sh);
+
   const uint32_t VIDEO_FRAMERATE = 20;
-  Analyzer a(d, VIDEO_FRAMERATE);
+  StdoutAnalyzer a(d, VIDEO_FRAMERATE, &eventBus);
   a.RegisterCondition(new EyesClosedCondition<float>());
   a.Run();
 
