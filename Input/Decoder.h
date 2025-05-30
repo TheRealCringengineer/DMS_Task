@@ -11,16 +11,16 @@
 class Decoder
 {
 public:
-  Decoder(InputData<float>* data, uint32_t dataRate)
+  Decoder(std::shared_ptr<InputData> data, uint32_t dataRate)
       : input(data)
       , readsPerSecond(dataRate)
   {}
 
-  void RegisterCondition(std::shared_ptr<Condition<float>> c)
+  void RegisterCondition(std::shared_ptr<Condition> c)
   {
     conditions.push_back(std::move(c));
   }
-  void DeleteCondition(std::shared_ptr<Condition<float>> c)
+  void DeleteCondition(std::shared_ptr<Condition> c)
   {
     auto it = std::find(conditions.begin(), conditions.end(), c);
     if(it != conditions.end()) conditions.erase(it);
@@ -51,8 +51,8 @@ private:
   }
 
 protected:
-  InputData<float>* input;
-  std::vector<std::shared_ptr<Condition<float>>> conditions;
+  std::shared_ptr<InputData> input;
+  std::vector<std::shared_ptr<Condition>> conditions;
 
   uint32_t readsPerSecond = 24;
 };

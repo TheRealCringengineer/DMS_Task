@@ -1,26 +1,17 @@
 #ifndef INPUT_H
 #define INPUT_H
 
-#include <type_traits>
+#include <istream>
+#include <stdexcept>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
-#include <istream>
-#include <string>
 
-// Объективно самая слабая часть реализации
-// Из-за класса InputData приходится таскать везде этот шаблонный параметр
-// D, чтобы указать тип полей
-// По хорошему нужна нормальная абстракция, которая позволила бы получать
-// поля любого типа :(
-//
-// С другой стороны - пока у нас есть набор данных одного типа в любом виде
-// Всё должно быть ОК
-//
+// Первая версия с шаблоном мне не нравилась
+// Приходилось везде передавать конкретный тип данных
+// Такой вариант с несколькими `TryType` методами выглядит чище (на мой взгляд)
 
-template<typename D,
-         typename =
-             typename std::enable_if<std::is_floating_point<D>::value, D>::type>
 class InputData
 {
 public:
@@ -30,85 +21,73 @@ public:
 
   virtual uint32_t GetCurrentFrame() { return currentFrame; }
 
-  virtual D GetField(std::string_view name) = 0;
+  virtual float TryGetFloat(std::string_view name)
+  {
+    ThrowNotImplemented();
+    return {};// To get rid of warnings
+  }
+  virtual double TryGetDouble(std::string_view name)
+  {
+    ThrowNotImplemented();
+    return {};// To get rid of warnings
+  }
+  virtual std::string_view TryGetString(std::string_view name)
+  {
+    ThrowNotImplemented();
+    return {};// To get rid of warnings
+  }
 
   virtual ~InputData() = default;
 
 protected:
   uint32_t currentFrame = 0;
+
+private:
+  void ThrowNotImplemented()
+  {
+    throw std::runtime_error("This method is not implemented");
+  }
 };
 
-template<typename D>
-class InputDataStream : public InputData<D>
+class InputDataStream : public InputData
 {
 public:
-  InputDataStream(std::basic_istream<char, std::char_traits<char>>* inp,
-                  std::vector<std::string> ind,
-                  const std::string& del)
+  InputDataStream(
+      std::shared_ptr<std::basic_istream<char, std::char_traits<char>>> inp,
+      std::vector<std::string> ind,
+      const std::string& del)
       : input(inp)
       , delimiter(del)
   {
     for(size_t i = 0; i < ind.size(); i++) indexes[ind[i]] = i;
   }
 
-  void ReadFields() override
-  {
-    std::getline(*input, line);
+  ~InputDataStream() override;
 
-    // Skipping comments
-    // Assuming comments are always fiirst symbol on the line
-    while(line.empty() || line[0] == COMMENT_SYMBOL) {
-      if(input->eof()) return;
-      std::getline(*input, line);
-    }
-
-    this->currentFrame++;
-    Split();
-  }
+  void ReadFields() override;
 
   bool IsFinished() override { return input->eof(); }
 
-  D GetField(std::string_view name) override
-  {
-    return tokens[indexes[name.data()]];
-  }
+  float TryGetFloat(std::string_view name) override;
+  double TryGetDouble(std::string_view name) override;
+  std::string_view TryGetString(std::string_view name) override;
 
 private:
   const char COMMENT_SYMBOL = '#';
 
   std::unordered_map<std::string, size_t> indexes;
   std::string line;
-  std::basic_istream<char, std::char_traits<char>>* input;
+  std::shared_ptr<std::basic_istream<char, std::char_traits<char>>> input;
 
-  std::vector<D> tokens;
+  std::vector<std::string> tokens;
   std::string token;
   std::string delimiter;
 
   size_t splitStart, splitEnd;
 
-  void Split()
-  {
-    tokens.clear();
-    splitStart = 0;
+  void CheckFieldName(std::string_view name);
 
-    while((splitEnd = line.find(delimiter, splitStart)) != std::string::npos) {
-      token = line.substr(splitStart, splitEnd - splitStart);
-      splitStart = splitEnd + delimiter.size();
-      if constexpr(std::is_same_v<D, float>) tokens.push_back(std::stof(token));
-
-      if constexpr(std::is_same_v<D, double>)
-        tokens.push_back(std::stod(token));
-    }
-
-    if(!line.substr(splitStart).empty()) {
-      if constexpr(std::is_same_v<D, float>) {
-        tokens.push_back(std::stof(line.substr(splitStart)));
-      }
-
-      if constexpr(std::is_same_v<D, double>)
-        tokens.push_back(std::stod(line.substr(splitStart)));
-    }
-  }
+  void Split();
 };
 
 #endif// INPUT_H

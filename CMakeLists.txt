@@ -14,5 +14,4 @@ add_custom_target(
     )
 endif()
 
-
-add_executable(${PROJECT_NAME} main.cpp)
+add_executable(${PROJECT_NAME} main.cpp Input/Input.cpp CustomConditions.cpp)

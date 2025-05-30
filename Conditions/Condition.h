@@ -13,7 +13,6 @@ enum class ConditionState : uint8_t
   End
 };
 
-template<typename D>
 class Condition
 {
 public:
@@ -21,7 +20,8 @@ public:
       : name(n)
   {}
 
-  virtual ConditionState CheckCondition(InputData<D>* data, float time) = 0;
+  virtual ConditionState CheckCondition(std::shared_ptr<InputData> data,
+                                        float time) = 0;
 
   virtual bool ShouldNotify() = 0;
 
@@ -39,6 +39,5 @@ protected:
   float startTime = .0f;
   float endTime = .0f;
 };
-
 
 #endif// CONDITION_H
