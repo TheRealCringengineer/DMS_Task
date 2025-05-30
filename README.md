@@ -41,7 +41,9 @@ Basic path of data is:
 
 ## Building
 Should work fine both on windows and/or linux
+
 Tested on MSVC 19.41.34123 x64
+
 Tested on gcc version 12.2.0 x64
 
 ### How to build
@@ -53,7 +55,25 @@ cmake --build build_dir
 That's all
 
 ## Usage
+
+### Example
+Just start `DMS_Task` from the build directory
+
+You should see output of several events based on input data
+
+```
+Event : Looking away started at 4.9 ended at 7.8
+Event : Looking away started at 8.4 ended at 10.75
+Event : Looking away started at 13.55 ended at 15.85
+Event : Eyes closed started at 17.15 ended at 19.25
+Event : Looking away started at 19.4 ended at 23
+Event : Looking away started at 26.2 ended at 29.75
+Event : Looking away started at 37.2 ended at 45.05
+```
+
+### Customizing
 Very simple example on how different components should be used is in `main.cpp`
+
 Assuming you have nothing and want to implement everything from scratch
 
 1) Implement `InputData` interface for your own method of data input
@@ -85,3 +105,17 @@ Event : Looking away started at 37.2 ended at 45.05
 ==9328==
 ==9328== ERROR SUMMARY: 0 errors from 0 contexts (suppressed: 0 from 0)
 ```
+
+## Further improvements
+
+I don't really like current implementation of `InputData` interface
+
+There should be an implementation in place to allow any arbitrary data type and data format/layout
+
+But due to very limited time frame it is what it is
+
+Though i tested memory leaks, i didn't have time to check for the speed of current implementation (also, dataset is small). So, it could be slow (at least i don't really like the part of string spliting in `InputDataStream` class)
+
+I like the EventBus implementation. I think it's fine. `Condition` class maybe is not very suitable for most of applications. It's very limited
+
+Maybe `Decoder` shouldn't work with `ConditionState` and that responsibility should be moved to `Condition` class
