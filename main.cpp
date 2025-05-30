@@ -5,122 +5,7 @@
 #include "Events/EventBus.h"
 #include "Input/Decoder.h"
 
-
-template<typename D>
-class EyesClosedCondition : public Condition<D>
-{
-public:
-  EyesClosedCondition()
-      : Condition<D>("Eyes closed")
-  {}
-
-  // В данных нет длительности больше 3-х секунд даже)
-  // Поэтому сделал вот так, чтобы была видна работа
-  bool ShouldNotify() override { return this->GetDuration() > 2.0f; }
-
-  ConditionState CheckCondition(InputData<D>* data, float time) override
-  {
-    prevState = wasLeftEyeClosed && wasRightEyeClosed;
-
-    if(IsPerson(data)) {
-      if(IsHead(data)) {
-        if(IsLeftEye(data) && IsRightEye(data)) {
-          if(IsLeftEyeClosed(data)) {
-            wasLeftEyeClosed = true;
-          } else if(IsLeftEyeOpened(data)) {
-            wasLeftEyeClosed = false;
-          }
-
-          if(IsRightEyeClosed(data)) {
-            wasRightEyeClosed = true;
-          } else if(IsRightEyeOpened(data)) {
-            wasRightEyeClosed = false;
-          }
-        }
-      }
-    } else {
-      // Если мы не можем найти человека => всё нормально
-      wasRightEyeClosed = false;
-      wasLeftEyeClosed = false;
-    }
-
-    // Если человек есть, а головы, глаз не видно => считаем что состояние
-    // закрытия/открытия глаз не менялось
-    if(!prevState && (wasRightEyeClosed && wasLeftEyeClosed)) {
-      this->startTime = time;
-      return ConditionState::Start;
-    }
-
-    if(prevState && !(wasRightEyeClosed && wasLeftEyeClosed)) {
-      this->endTime = time;
-      return ConditionState::End;
-    }
-
-    return ConditionState::NoChange;
-  };
-
-  ~EyesClosedCondition() override = default;
-
-private:
-  bool prevState = false;
-
-  // Храним последнее состояние глаза. В случае
-  // неопредленного сотояния (probUnknown или вероятности у всех состояний < 0.5)
-  // мы учитываем его как текущее состояние
-  bool wasLeftEyeClosed = false;
-  bool wasRightEyeClosed = false;
-
-  const float SUCCESS_VALUE = 0.5f;
-  bool IsPerson(InputData<D>* data)
-  {
-    return data->GetField("Person.confidence") > SUCCESS_VALUE;
-  }
-
-  bool IsHead(InputData<D>* data)
-  {
-    return data->GetField("Head.detection.confidence") > SUCCESS_VALUE;
-  }
-
-  bool IsLeftEye(InputData<D>* data)
-  {
-    return data->GetField("Eye1.detection.confidence") > SUCCESS_VALUE;
-  }
-
-  bool IsLeftEyeOpened(InputData<D>* data)
-  {
-    return data->GetField("Eye1.state.probOpen") > SUCCESS_VALUE;
-  }
-
-  bool IsLeftEyeClosed(InputData<D>* data)
-  {
-    return data->GetField("Eye1.state.probClosed") > SUCCESS_VALUE;
-  }
-
-  bool IsLeftEyeUnknown(InputData<D>* data)
-  {
-    return data->GetField("Eye1.state.probUnknown") > SUCCESS_VALUE;
-  }
-
-  bool IsRightEye(InputData<D>* data)
-  {
-    return data->GetField("Eye2.detection.confidence") > SUCCESS_VALUE;
-  }
-
-  bool IsRightEyeOpened(InputData<D>* data)
-  {
-    return data->GetField("Eye2.state.probOpen") > SUCCESS_VALUE;
-  }
-
-  bool IsRightEyeClosed(InputData<D>* data)
-  {
-    return data->GetField("Eye2.state.probClosed") > SUCCESS_VALUE;
-  }
-
-  bool IsRightEyeUnknown(InputData<D>* data)
-  {
-    return data->GetField("Eye2.state.probUnknown") > SUCCESS_VALUE;
-  }
-};
+#include "CustomConditions.h"
 
 class StdoutDecoder : public Decoder
 {
@@ -134,7 +19,7 @@ public:
 
   void CheckConditions(float time) override
   {
-    for(auto condition: conditions) {
+    for(auto& condition: conditions) {
 
       ConditionState state = condition->CheckCondition(input, time);
       switch(state) {
@@ -224,7 +109,8 @@ int main()
 
   const uint32_t VIDEO_FRAMERATE = 20;
   StdoutDecoder a(d, VIDEO_FRAMERATE, &eventBus);
-  a.RegisterCondition(new EyesClosedCondition<float>());
+  a.RegisterCondition(std::make_shared<EyesClosedCondition<float>>());
+  a.RegisterCondition(std::make_shared<LookingAwayCondition<float>>());
   a.Run();
 
   return 0;

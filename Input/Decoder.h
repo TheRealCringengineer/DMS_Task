@@ -16,7 +16,15 @@ public:
       , readsPerSecond(dataRate)
   {}
 
-  void RegisterCondition(Condition<float>* c) { conditions.push_back(c); }
+  void RegisterCondition(std::shared_ptr<Condition<float>> c)
+  {
+    conditions.push_back(std::move(c));
+  }
+  void DeleteCondition(std::shared_ptr<Condition<float>> c)
+  {
+    auto it = std::find(conditions.begin(), conditions.end(), c);
+    if(it != conditions.end()) conditions.erase(it);
+  }
 
   void Run()
   {
@@ -44,7 +52,7 @@ private:
 
 protected:
   InputData<float>* input;
-  std::vector<Condition<float>*> conditions;
+  std::vector<std::shared_ptr<Condition<float>>> conditions;
 
   uint32_t readsPerSecond = 24;
 };
