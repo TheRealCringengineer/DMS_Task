@@ -62,7 +62,7 @@ public:
     for(size_t i = 0; i < ind.size(); i++) indexes[ind[i]] = i;
   }
 
-  ~InputDataStream() override;
+  ~InputDataStream() override = default;
 
   void ReadFields() override;
 
