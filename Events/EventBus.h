@@ -5,8 +5,7 @@
 #include <memory>
 #include <vector>
 
-
-// shared_ptr по логике нужен, потому что мы не знаем о lifetime 
+// shared_ptr по логике нужен, потому что мы не знаем о lifetime
 // нашего std::function. Если там какая-нибудь лямбда локальная, ещё что-то
 // handler должен жить, пока он используется
 
@@ -16,7 +15,9 @@ class EventBus
 public:
   void FireEvent(ARGS... args)
   {
-    for(auto& handler: handlers) { handler(args...); }
+    for(std::shared_ptr<std::function<bool(ARGS...)>> handler: handlers) {
+      if((*handler)(args...)) break;
+    }
   }
 
   void Register(std::shared_ptr<std::function<bool(ARGS...)>> fn)
